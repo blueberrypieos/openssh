@@ -1,0 +1,34 @@
+Description: An abandoned connection writes the logout record
+ Most connections end with an abandon event, not a close event.
+ Both now write the logout record.
+Origin: https://github.com/apple-oss-distributions/OpenSSH/tree/OpenSSH-354.120.2
+Forwarded: not-needed
+Last-Update: 2026-11-11
+
+--- a/audit-bsm.c
++++ b/audit-bsm.c
+@@ -31,6 +31,7 @@
+  *
+  */
+ /* Modified 2026-11-11: each login gets a new audit session with its session flags, even when auditing is off. */
++/* Modified 2026-11-11: a connection that ends without a close event also writes the logout record. */
+ /* #pragma ident	"@(#)bsmaudit.c	1.1	01/09/17 SMI" */
+ 
+ #include "includes.h"
+@@ -461,6 +462,16 @@ audit_event(struct ssh *ssh, ssh_audit_e
+ 		break;
+ 
+ 	case SSH_CONNECTION_CLOSE:
++#ifdef __APPLE_AUDIT_BSM_LOGOUT_FIX__
++	/*
++	 * Treat CLOSE and ABANDON the same, as the most common case of
++	 * regular connection close emits an ABANDON, not a CLOSE,
++	 * and OpenBSM audit doesn't make the distinction anyway.
++	 * The use of CLOSE and ABANDON should probably be revisited
++	 * upstream.
++	 */
++	case SSH_CONNECTION_ABANDON:
++#endif
+ 		/*
+ 		 * We can also get a close event if the user attempted auth
+ 		 * but never succeeded.

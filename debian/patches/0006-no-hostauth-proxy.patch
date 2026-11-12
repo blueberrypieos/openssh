@@ -1,0 +1,159 @@
+Description: The ssh_config option NoHostAuthenticationForProxyCommand
+ With it set to yes, ssh accepts the host key of a connection made
+ through a ProxyCommand.
+Origin: https://github.com/apple-oss-distributions/OpenSSH/tree/OpenSSH-354.120.2
+Forwarded: not-needed
+Last-Update: 2026-11-11
+
+--- a/readconf.c
++++ b/readconf.c
+@@ -11,6 +11,7 @@
+  * incompatible with the protocol description in the RFC file, it must be
+  * called by a name other than "ssh" or "Secure Shell".
+  */
++/* Modified 2026-11-11: the ssh_config option NoHostAuthenticationForProxyCommand. */
+ 
+ #include "includes.h"
+ 
+@@ -149,6 +150,9 @@ typedef enum {
+ 	oDynamicForward, oPreferredAuthentications, oHostbasedAuthentication,
+ 	oHostKeyAlgorithms, oBindAddress, oBindInterface, oPKCS11Provider,
+ 	oClearAllForwardings, oNoHostAuthenticationForLocalhost,
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++	oNoHostAuthenticationForProxyCommand,
++#endif
+ 	oEnableSSHKeysign, oRekeyLimit, oVerifyHostKeyDNS, oConnectTimeout,
+ 	oAddressFamily, oGssAuthentication, oGssDelegateCreds,
+ 	oServerAliveInterval, oServerAliveCountMax, oIdentitiesOnly,
+@@ -270,6 +274,9 @@ static struct {
+ 	{ "enablesshkeysign", oEnableSSHKeysign },
+ 	{ "verifyhostkeydns", oVerifyHostKeyDNS },
+ 	{ "nohostauthenticationforlocalhost", oNoHostAuthenticationForLocalhost },
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++	{ "nohostauthenticationforproxycommand", oNoHostAuthenticationForProxyCommand },
++#endif
+ 	{ "rekeylimit", oRekeyLimit },
+ 	{ "connecttimeout", oConnectTimeout },
+ 	{ "addressfamily", oAddressFamily },
+@@ -1364,6 +1371,12 @@ parse_time:
+ 		intptr = &options->no_host_authentication_for_localhost;
+ 		goto parse_flag;
+ 
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++	case oNoHostAuthenticationForProxyCommand:
++		intptr = &options->no_host_authentication_for_proxy_command;
++		goto parse_flag;
++
++#endif
+ 	case oNumberOfPasswordPrompts:
+ 		intptr = &options->number_of_password_prompts;
+ 		goto parse_int;
+@@ -2782,6 +2795,9 @@ initialize_options(Options * options)
+ 	options->sk_provider = NULL;
+ 	options->enable_ssh_keysign = -1;
+ 	options->no_host_authentication_for_localhost = -1;
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++	options->no_host_authentication_for_proxy_command = -1;
++#endif
+ 	options->identities_only = -1;
+ 	options->rekey_limit = -1;
+ 	options->rekey_interval = -1;
+@@ -2968,6 +2984,10 @@ fill_default_options(Options * options)
+ 		options->log_facility = SYSLOG_FACILITY_USER;
+ 	if (options->no_host_authentication_for_localhost == -1)
+ 		options->no_host_authentication_for_localhost = 0;
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++	if (options->no_host_authentication_for_proxy_command == -1)
++		options->no_host_authentication_for_proxy_command = 0;
++#endif
+ 	if (options->identities_only == -1)
+ 		options->identities_only = 0;
+ 	if (options->enable_ssh_keysign == -1)
+@@ -3783,6 +3803,9 @@ dump_client_config(Options *o, const cha
+ 	dump_cfg_fmtint(oIdentitiesOnly, o->identities_only);
+ 	dump_cfg_fmtint(oKbdInteractiveAuthentication, o->kbd_interactive_authentication);
+ 	dump_cfg_fmtint(oNoHostAuthenticationForLocalhost, o->no_host_authentication_for_localhost);
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++	dump_cfg_fmtint(oNoHostAuthenticationForProxyCommand, o->no_host_authentication_for_proxy_command);
++#endif
+ 	dump_cfg_fmtint(oPasswordAuthentication, o->password_authentication);
+ 	dump_cfg_fmtint(oPermitLocalCommand, o->permit_local_command);
+ 	dump_cfg_fmtint(oProxyUseFdpass, o->proxy_use_fdpass);
+--- a/readconf.h
++++ b/readconf.h
+@@ -12,6 +12,7 @@
+  * incompatible with the protocol description in the RFC file, it must be
+  * called by a name other than "ssh" or "Secure Shell".
+  */
++/* Modified 2026-11-11: the ssh_config option NoHostAuthenticationForProxyCommand. */
+ 
+ #ifndef READCONF_H
+ #define READCONF_H
+@@ -122,6 +123,9 @@ typedef struct {
+ 	int64_t rekey_limit;
+ 	int	rekey_interval;
+ 	int	no_host_authentication_for_localhost;
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++	int	no_host_authentication_for_proxy_command;
++#endif
+ 	int	identities_only;
+ 	int	server_alive_interval;
+ 	int	server_alive_count_max;
+--- a/ssh_config.5
++++ b/ssh_config.5
+@@ -33,6 +33,7 @@
+ .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ .\"
++.\" Modified 2026-11-11: documents NoHostAuthenticationForProxyCommand.
+ .\" $OpenBSD: ssh_config.5,v 1.432 2026/09/20 01:05:55 dtucker Exp $
+ .Dd $Mdocdate: September 20 2026 $
+ .Dt SSH_CONFIG 5
+@@ -1510,6 +1511,16 @@ The argument to this keyword must be
+ or
+ .Cm no
+ (the default).
++.\" #ifdef __APPLE_NOHOSTAUTHPROXY__
++.It Cm NoHostAuthenticationForProxyCommand
++Disable host authentication when using
++.Cm ProxyCommand .
++The argument to this keyword must be
++.Cm yes
++or
++.Cm no
++(the default).
++.\" #endif
+ .It Cm NumberOfPasswordPrompts
+ Specifies the number of password prompts before giving up.
+ The argument to this keyword must be an integer.
+--- a/sshconnect.c
++++ b/sshconnect.c
+@@ -12,6 +12,7 @@
+  * incompatible with the protocol description in the RFC file, it must be
+  * called by a name other than "ssh" or "Secure Shell".
+  */
++/* Modified 2026-11-11: the ssh_config option NoHostAuthenticationForProxyCommand. */
+ 
+ #include "includes.h"
+ 
+@@ -1017,6 +1018,20 @@ check_host_key(char *hostname, const str
+ 		options.update_hostkeys = 0;
+ 		return 0;
+ 	}
++#ifdef __APPLE_NOHOSTAUTHPROXY__
++
++	/*
++	 * Similar to the above scenario, in some cases a ProxyCommand
++	 * may refer to multiple hosts and provide its own host
++	 * authentication mechanism.
++	 */
++	if (options.no_host_authentication_for_proxy_command == 1 &&
++	    options.proxy_command != NULL) {
++		debug("Forcing accepting of host key for ProxyCommand.");
++		options.update_hostkeys = 0;
++		return 0;
++	}
++#endif
+ 
+ 	/*
+ 	 * Don't ever try to write an invalid name to a known hosts file.

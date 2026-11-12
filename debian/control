@@ -1,0 +1,17 @@
+Source: openssh
+Section: net
+Priority: optional
+Maintainer: Maxwell <maxwell@blueberrypieos.com>
+Build-Depends: pietoolchain (>= 0.1.0), autoconf, automake
+Standards-Version: 4.7.3
+Homepage: https://www.openssh.com/
+Vcs-Git: https://github.com/blueberrypieos/openssh.git -b blueberry-pie-os/latest
+Vcs-Browser: https://github.com/blueberrypieos/openssh
+Rules-Requires-Root: no
+
+Package: openssh
+Architecture: darwin-arm64
+Depends: libbsm, libresolv, libsystem, openssl (>= 3.5.9+ds1-1), openpam, pam-modules (>= 217.100.6+ds2-1), zlib
+Description: secure remote login and file transfer
+ OpenSSH clients, server, file transfer tools and key management tools.
+ The server supports public keys and PAM password authentication.

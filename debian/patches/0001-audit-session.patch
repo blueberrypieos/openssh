@@ -1,0 +1,122 @@
+Description: Each login gets its own audit session
+ sshd asks the kernel for a new audit session for every login.
+ The session is flagged as remote.
+ It is also flagged as authenticated when the user is valid.
+ It is flagged as having a tty when a tty is permitted.
+ This is done even when auditing is off.
+ If the session cannot be set up for any reason but EPERM, the login fails.
+Origin: https://github.com/apple-oss-distributions/OpenSSH/tree/OpenSSH-354.120.2
+Forwarded: not-needed
+Last-Update: 2026-11-11
+
+--- a/audit-bsm.c
++++ b/audit-bsm.c
+@@ -30,6 +30,7 @@
+  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  *
+  */
++/* Modified 2026-11-11: each login gets a new audit session with its session flags, even when auditing is off. */
+ /* #pragma ident	"@(#)bsmaudit.c	1.1	01/09/17 SMI" */
+ 
+ #include "includes.h"
+@@ -62,6 +63,15 @@
+ #include <bsm/audit_record.h>
+ #include <locale.h>
+ 
++#ifdef __APPLE__
++#include <bsm/audit_session.h>
++#include "auth-options.h"
++#include "misc.h"
++#include "servconf.h"
++extern ServerOptions options;
++extern struct sshauthopt *auth_opts;
++#endif
++
+ #if defined(HAVE_GETAUDIT_ADDR)
+ #define	AuditInfoStruct		auditinfo_addr
+ #define AuditInfoTermID		au_tid_addr_t
+@@ -306,11 +316,26 @@ bsm_audit_session_setup(void)
+ 		return;
+ 	}
+ 
++#ifdef __APPLE__
++	bzero(&info, sizeof (info));
++	info.ai_flags = AU_SESSION_FLAG_IS_REMOTE;
++	if (the_authctxt->valid)  {
++	    info.ai_flags |=  AU_SESSION_FLAG_HAS_AUTHENTICATED;
++	}
++	if (auth_opts->permit_pty_flag && options.permit_tty) {
++		info.ai_flags |=  AU_SESSION_FLAG_HAS_TTY;
++	}
++#endif
++
+ 	if (the_authctxt->valid)
+ 		info.ai_auid = the_authctxt->pw->pw_uid;
+ 	else
+ 		info.ai_auid = -1;
++#ifdef __APPLE__
++	info.ai_asid = AU_ASSIGN_ASID;
++#else
+ 	info.ai_asid = getpid();
++#endif
+ 	mask.am_success = 0;
+ 	mask.am_failure = 0;
+ 
+@@ -322,9 +347,16 @@ bsm_audit_session_setup(void)
+ 	info.ai_termid = ssh_bsm_tid;
+ 
+ 	rc = SetAuditFunc(&info, sizeof(info));
++#ifdef __APPLE__
++	int e = errno;
++#endif
+ 	if (rc < 0)
+ 		error("BSM audit: %s: %s failed: %s", __func__,
+ 		    SetAuditFuncText, strerror(errno));
++#ifdef __APPLE__
++	if (rc < 0 && e != EPERM)
++		fatal("Could not create new audit session");
++#endif
+ }
+ 
+ static void
+@@ -353,8 +385,14 @@ audit_connection_from(const char *host,
+ 	AuditInfoTermID *tid = &ssh_bsm_tid;
+ 	char buf[1024];
+ 
++#ifndef __APPLE_AUDIT_SESSION_ALWAYS__
++	/*
++	 * Audit session setup depends on ssh_bsm_tid being set,
++	 * otherwise setaudit_addr() will fail.
++	 */
+ 	if (cannot_audit(0))
+ 		return;
++#endif
+ 	debug3("BSM audit: connection from %.100s port %d", host, port);
+ 
+ 	/* populate our terminal id structure */
+@@ -398,13 +436,25 @@ audit_event(struct ssh *ssh, ssh_audit_e
+ 	static int logged_in = 0;
+ 	const char *user = the_authctxt ? the_authctxt->user : "(unknown user)";
+ 
++#ifdef __APPLE_AUDIT_SESSION_ALWAYS__
++	/*
++	 * Always set up the audit session, even when the audit
++	 * trail is disabled.
++	 */
++	if (event == SSH_AUTH_SUCCESS) {
++		bsm_audit_session_setup();
++	}
++#endif
++
+ 	if (cannot_audit(0))
+ 		return;
+ 
+ 	switch(event) {
+ 	case SSH_AUTH_SUCCESS:
+ 		logged_in = 1;
++#ifndef __APPLE_AUDIT_SESSION_ALWAYS__
+ 		bsm_audit_session_setup();
++#endif
+ 		snprintf(textbuf, sizeof(textbuf),
+ 		    gettext("successful login %s"), user);
+ 		bsm_audit_record(0, textbuf, AUE_openssh);

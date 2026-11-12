@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 The Blueberry Pie OS Authors
+
+include /usr/share/pietoolchain/rules.mk
+
+SRC := $(W)/src
+export PIE_REPRO_SOURCE := $(SRC)
+BINUTILS := $(TOOLCHAIN)/prefix/bin/aarch64-apple-darwin
+FEATURES := __APPLE_AUDIT_BSM_LOGOUT_FIX__ __APPLE_AUDIT_SESSION_ALWAYS__ __APPLE_DISPLAY_VAR__ \
+	__APPLE_MEMBERSHIP__ __APPLE_NOHOSTAUTHPROXY__ __APPLE_TMPDIR__
+SSH_CPPFLAGS := $(ARCHFLAGS) -isysroot $(SYSROOT) $(MINVER) $(addprefix -D,$(FEATURES))
+CONFIGURE_FLAGS := --host=aarch64-apple-darwin --build=$(shell uname -m)-pc-linux-gnu \
+	--prefix=/usr --sysconfdir=/etc/ssh --libexecdir=/usr/libexec \
+	--with-privsep-path=/var/empty --with-privsep-user=_sshd --with-pid-dir=/var/run \
+	--without-rpath --with-pam --with-audit=bsm --disable-libutil \
+	--with-sandbox=no --disable-strip --with-mantype=man \
+	--without-security-key-builtin --with-xauth=/usr/bin/xauth
+
+all: $(OBJ)/.built
+
+$(OBJ)/.configured: $(SRCROOT)/debian/rules
+	rm -rf $(SRC)
+	mkdir -p $(SRC) $(OBJ)
+	cd $(SRCROOT) && find . -mindepth 1 -maxdepth 1 ! -name debian ! -name .git ! -name .pc -exec cp -a -t $(SRC) -- {} +
+	cd $(SRC) && autoreconf -fi > $(OBJ)/autoreconf.log 2>&1
+	cd $(OBJ) && CC=$(CC) CFLAGS="$(BASE_CFLAGS)" CPPFLAGS="$(SSH_CPPFLAGS)" \
+		LDFLAGS="$(BASE_LDFLAGS)" AR=$(BINUTILS)-ar RANLIB=$(BINUTILS)-ranlib \
+		$(SRC)/configure $(CONFIGURE_FLAGS) > configure.log
+	touch $@
+
+$(OBJ)/.built: $(OBJ)/.configured
+	$(MAKE) -C $(OBJ)
+	touch $@
+
+install: all
+	$(MAKE) -C $(OBJ) install-nokeys DESTDIR=$(ROOT)
+	install -D -m 644 $(SRCROOT)/debian/pam.d/sshd $(ROOT)/etc/pam.d/sshd
+	printf '\nAcceptEnv LANG LC_*\nUsePAM yes\nPasswordAuthentication yes\nKbdInteractiveAuthentication yes\nPermitRootLogin no\n' >> $(ROOT)/etc/ssh/sshd_config
+	printf '\nHost *\n    SendEnv LANG LC_*\n' >> $(ROOT)/etc/ssh/ssh_config
+
+.PHONY: all install

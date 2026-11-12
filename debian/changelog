@@ -1,0 +1,6 @@
+openssh (10.6p1+ds1-1) blueberry-pie-os; urgency=medium
+
+  * OpenSSH 10.6p1.
+  * Each login gets its own audit session.
+
+ -- Maxwell <maxwell@blueberrypieos.com>  Wed, 11 Nov 2026 11:55:00 +0000
